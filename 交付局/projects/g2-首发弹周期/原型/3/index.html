@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>红限反应堆 Redline Reactor</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { background: #07090f; color: #cfd8e3; font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif; }
+  #wrap { max-width: 1000px; margin: 0 auto; padding: 14px 10px 30px; }
+  header { text-align: center; margin-bottom: 10px; }
+  header h1 { font-size: 26px; letter-spacing: 2px; color: #e8eef7; }
+  header h1 span { font-size: 13px; color: #5c6b80; letter-spacing: 4px; margin-left: 10px; }
+  #stage { position: relative; width: 100%; }
+  canvas { display: block; width: 100%; height: auto; background: #0a0e16;
+           border: 1px solid #1d2736; border-radius: 10px; }
+  /* ---- overlays ---- */
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column;
+             align-items: center; justify-content: center; text-align: center;
+             background: rgba(7, 9, 15, 0.86); border-radius: 10px; padding: 20px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 34px; letter-spacing: 6px; margin-bottom: 6px; }
+  .overlay .sub { color: #7f8ea3; font-size: 13px; margin-bottom: 18px; letter-spacing: 2px; }
+  .overlay .tutorial { max-width: 620px; line-height: 1.8; font-size: 14px; color: #b9c6d6;
+                       background: #101623; border: 1px solid #223048; border-radius: 8px;
+                       padding: 14px 18px; margin-bottom: 18px; }
+  .overlay .tutorial b { color: #ffd27a; }
+  .overlay .tutorial .k { display: inline-block; border: 1px solid #3a4a63; border-radius: 4px;
+                          padding: 0 6px; margin: 0 2px; color: #9fd6ff; font-size: 12px; }
+  .bigbtn { font-size: 20px; letter-spacing: 3px; padding: 12px 46px; border-radius: 8px;
+            border: 1px solid #3d5a80; background: linear-gradient(180deg, #1b2a44, #121b2c);
+            color: #eaf2fc; cursor: pointer; }
+  .bigbtn:hover { background: linear-gradient(180deg, #24395c, #16233a); border-color: #5a7db0; }
+  .diffrow { margin-bottom: 16px; font-size: 13px; color: #8fa1b8; }
+  .diffrow select { background: #101623; color: #cfe0f5; border: 1px solid #31445f;
+                    border-radius: 5px; padding: 4px 8px; margin-left: 8px; font-size: 14px; }
+  #endStats { margin: 4px 0 18px; font-size: 15px; line-height: 2; color: #b9c6d6; }
+  #endStats b { color: #ffd27a; }
+  #endTitle.win { color: #6fe3a0; }
+  #endTitle.loss { color: #ff6b5e; }
+  /* ---- controls ---- */
+  #controls { display: flex; gap: 10px; margin-top: 12px; }
+  #controls button { flex: 1; padding: 13px 6px 11px; border-radius: 8px; cursor: pointer;
+                     border: 1px solid #2a3a52; background: linear-gradient(180deg, #141d2e, #0d1420);
+                     color: #dce7f5; text-align: center; transition: transform 0.05s; }
+  #controls button:active { transform: scale(0.97); }
+  #controls button .big { display: block; font-size: 19px; letter-spacing: 3px; margin-bottom: 3px; }
+  #controls button .small { display: block; font-size: 12px; color: #7f92ab; }
+  #controls button .key { color: #5b7ba0; }
+  #btnStoke .big { color: #9fd6ff; }
+  #btnVent .big { color: #8be08b; }
+  #btnBank .big { color: #ffd27a; }
+  #controls button.disabled { opacity: 0.38; cursor: default; }
+  #controls button.cd { border-color: #4a3f1f; }
+  /* ---- footer ---- */
+  #foot { margin-top: 12px; font-size: 12.5px; color: #64768d; line-height: 1.9; text-align: center; }
+  #foot .metrics { color: #4d6a55; letter-spacing: 0.5px; }
+  #foot .metrics b { color: #7fae8c; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <header>
+    <h1>红限反应堆<span>REDLINE REACTOR</span></h1>
+  </header>
+
+  <div id="stage">
+    <canvas id="cv" width="960" height="560"></canvas>
+
+    <div id="startOverlay" class="overlay">
+      <h2>红限反应堆</h2>
+      <div class="sub">REDLINE REACTOR · 一局 4 分钟的骑线放置</div>
+      <div class="tutorial">
+        电力每秒自动上涨，你只管三个键：<br>
+        <span class="k">1</span><b>加购</b>——产出 ×1.5，但产热同步变快；
+        <span class="k">2</span><b>排热</b>——泄掉大量热量，浪费当前电力 25%；
+        <span class="k">3</span><b>入库</b>——把电力按倍率转入金库，<b>热量越高倍率越高（红热 ×2.1）</b>。<br>
+        在堆芯熔毁或 4:10 班次结束前，<b>入库 4800 单位</b>即胜。
+      </div>
+      <div class="diffrow">难度
+        <select id="diffSel">
+          <option value="easy">轻松（目标 3400 / 4:40）</option>
+          <option value="normal" selected>标准（目标 4800 / 4:10）</option>
+          <option value="hard">严酷（目标 5300 / 3:55）</option>
+        </select>
+      </div>
+      <button class="bigbtn" id="btnStart">点 火 开 炉</button>
+    </div>
+
+    <div id="endOverlay" class="overlay hidden">
+      <h2 id="endTitle">核心熔毁</h2>
+      <div class="sub" id="endSub">ME L T D O W N</div>
+      <div id="endStats"></div>
+      <button class="bigbtn" id="btnRetry">再 来 一 炉</button>
+    </div>
+  </div>
+
+  <div id="controls">
+    <button id="btnStoke"><span class="big">加 购 <span class="key">[1]</span></span><span class="small" id="stokeInfo">价格 18</span></button>
+    <button id="btnVent"><span class="big">排 热 <span class="key">[2]</span></span><span class="small" id="ventInfo">就绪 · 泄 45</span></button>
+    <button id="btnBank"><span class="big">入 库 <span class="key">[3]</span></span><span class="small" id="bankInfo">倍率 ×0.40</span></button>
+  </div>
+
+  <div id="foot">
+    一句话上手：先连按 <b>加购</b> 爬产出；热量逼近红线时 <b>入库</b> 再 <b>排热</b>（入库后电力归零，排热的 25% 损耗也就无所谓）——「骑红限入库」是唯一的高倍率姿势。<br>
+    <span class="metrics" id="metricsLine">埋点：局数 0 · 失败重试 0 · 胜 0 · 负 0 （console 可读取 window.__metrics）</span>
+  </div>
+</div>
+
+<script src="core.js"></script>
+<script>
+/* ======================================================================
+ * 渲染层：只做输入与绘制，规则全部来自 core.js（RedlineReactor）
+ * ====================================================================== */
+'use strict';
+var Core = window.RedlineReactor;
+var cv = document.getElementById('cv');
+var ctx = cv.getContext('2d');
+var W = cv.width, H = cv.height;
+
+var T = Core.TUNING;
+var run = null;                 // 当前局（ReactorRun）
+var phase = 'title';            // 'title' | 'playing' | 'over'
+var diff = 'normal';
+var lastTs = 0;
+var stars = [], particles = [], floats = [];
+var flash = 0;                  // 熔毁白闪
+var idleT = 0;
+
+for (var i = 0; i < 90; i++) {
+  stars.push({ x: Math.random() * W, y: Math.random() * H, r: Math.random() * 1.3 + 0.2, a: Math.random() * 0.5 + 0.1 });
+}
+
+/* ---------- 工具 ---------- */
+function heatHue(h) { // 0..100 → 190(青) → 45(琥珀) → 8(红)
+  var x = Math.pow(Math.min(h, 100) / 100, 1.05);
+  return 190 - 182 * x;
+}
+function heatColor(h, l, a) {
+  return 'hsla(' + heatHue(h).toFixed(0) + ',85%,' + (l || 55) + '%,' + (a === undefined ? 1 : a) + ')';
+}
+function fmt1(n) { return n.toFixed(1); }
+function fmtClock(s) {
+  s = Math.max(0, Math.ceil(s));
+  var m = Math.floor(s / 60); s = s % 60;
+  return m + ':' + (s < 10 ? '0' : '') + s;
+}
+
+/* ---------- 局生命周期 ---------- */
+function startRun() {
+  run = Core.createRun({ difficulty: diff });
+  particles.length = 0;
+  floats.length = 0;
+  flash = 0;
+  phase = 'playing';
+  document.getElementById('startOverlay').classList.add('hidden');
+  document.getElementById('endOverlay').classList.add('hidden');
+  refreshFoot();
+}
+
+function endRun() {
+  phase = 'over';
+  var won = run.state === 'won';
+  var title = document.getElementById('endTitle');
+  title.textContent = won ? '班 次 达 标' : (run.endReason === 'meltdown' ? '堆 芯 熔 毁' : '班 次 超 时');
+  title.className = won ? 'win' : 'loss';
+  document.getElementById('endSub').textContent = won ? 'SHIFT COMPLETE' :
+    (run.endReason === 'meltdown' ? 'M E L T D O W N' : 'S H I F T   O V E R');
+  document.getElementById('endStats').innerHTML =
+    '用时 <b>' + fmtClock(run.time) + '</b> · 入库 <b>' + fmt1(run.banked) + '</b> / ' + run.cfg.VAULT_GOAL +
+    ' · 加购 <b>' + run.stokes + '</b> 次 · 排热 <b>' + run.vents + '</b> 次 · 入库 <b>' + run.banks + '</b> 次';
+  document.getElementById('endOverlay').classList.remove('hidden');
+  refreshFoot();
+}
+
+function refreshFoot() {
+  var c = window.__metrics.counters; // live 引用
+  document.getElementById('metricsLine').innerHTML =
+    '埋点：局数 <b>' + c.run_start + '</b> · 失败重试 <b>' + c.retry + '</b> · 胜 <b>' + c.win +
+    '</b> · 负 <b>' + c.loss + '</b>（console 可读取 window.__metrics）';
+}
+
+/* ---------- 输入 ---------- */
+function act(kind) {
+  if (phase !== 'playing' || !run) return;
+  if (kind === 'stoke') {
+    if (run.actStoke()) pushFloat(250, 300, '加购 x' + run.stokes, '#9fd6ff', -1);
+  } else if (kind === 'vent') {
+    if (run.actVent()) pushFloat(250, 300, '排热 -' + fmt1(run.ventHeat), '#8be08b', -1);
+  } else if (kind === 'bank') {
+    if (run.actBank()) pushFloat(430, 210, '+' + fmt1(run.lastGain), '#ffd27a', -1);
+  }
+}
+document.getElementById('btnStoke').onclick = function () { act('stoke'); };
+document.getElementById('btnVent').onclick = function () { act('vent'); };
+document.getElementById('btnBank').onclick = function () { act('bank'); };
+document.getElementById('btnStart').onclick = function () {
+  diff = document.getElementById('diffSel').value;
+  startRun();
+};
+document.getElementById('btnRetry').onclick = function () { startRun(); };
+document.addEventListener('keydown', function (e) {
+  if (e.key === '1' || e.key === 's' || e.key === 'S') act('stoke');
+  else if (e.key === '2' || e.key === 'v' || e.key === 'V') act('vent');
+  else if (e.key === '3' || e.key === 'b' || e.key === 'B') act('bank');
+  else if (e.key === 'Enter' && phase === 'title') document.getElementById('btnStart').click();
+  else if (e.key === 'Enter' && phase === 'over') document.getElementById('btnRetry').click();
+});
+window.addEventListener('beforeunload', function () { Core.endSession(); });
+
+/* ---------- 漂浮文字 ---------- */
+function pushFloat(x, y, text, color, vy) {
+  floats.push({ x: x, y: y, text: text, color: color, life: 1.2, vy: vy === undefined ? -34 : vy });
+}
+
+/* ---------- 主循环 ---------- */
+function loop(ts) {
+  var dt = Math.min(0.05, Math.max(0, (ts - lastTs) / 1000));
+  lastTs = ts;
+  idleT += dt;
+
+  if (phase === 'playing' && run) {
+    run.update(dt);
+    if (run.state !== 'running') { endRun(); if (run.endReason === 'meltdown') flash = 1; }
+  }
+  draw(dt);
+  updateControls();
+  requestAnimationFrame(loop);
+}
+
+/* ---------- 绘制 ---------- */
+function draw(dt) {
+  var heat = run ? run.heat : 0;
+  var rate = run ? run.rate : 2.2;
+  var simT = run ? run.time : idleT;
+
+  ctx.clearRect(0, 0, W, H);
+
+  // 背景
+  var bg = ctx.createLinearGradient(0, 0, 0, H);
+  bg.addColorStop(0, '#0b101c'); bg.addColorStop(1, '#07090f');
+  ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#ffffff';
+  for (var i = 0; i < stars.length; i++) {
+    var st = stars[i];
+    ctx.globalAlpha = st.a * (0.6 + 0.4 * Math.sin(simT * 1.5 + i));
+    ctx.fillRect(st.x, st.y, st.r, st.r);
+  }
+  ctx.globalAlpha = 1;
+
+  drawCore(dt, heat, rate, simT);
+  if (run) drawHeatGauge(heat);
+  drawRightPanel();
+
+  // 高热红晕 / 熔毁白闪
+  if (run && heat > 78 && phase === 'playing') {
+    var danger = (heat - 78) / 22;
+    var vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.75);
+    vg.addColorStop(0, 'rgba(255,40,20,0)');
+    vg.addColorStop(1, 'rgba(255,40,20,' + (0.28 * danger * (0.7 + 0.3 * Math.sin(simT * 12))).toFixed(3) + ')');
+    ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+  }
+  if (flash > 0) {
+    ctx.fillStyle = 'rgba(255,120,60,' + (flash * 0.5).toFixed(3) + ')';
+    ctx.fillRect(0, 0, W, H);
+    flash = Math.max(0, flash - dt * 1.4);
+  }
+
+  // 漂浮文字
+  for (i = floats.length - 1; i >= 0; i--) {
+    var f = floats[i];
+    f.life -= dt; f.y += f.vy * dt;
+    if (f.life <= 0) { floats.splice(i, 1); continue; }
+    ctx.globalAlpha = Math.min(1, f.life);
+    ctx.font = 'bold 17px Consolas, monospace';
+    ctx.fillStyle = f.color;
+    ctx.fillText(f.text, f.x, f.y);
+  }
+  ctx.globalAlpha = 1;
+}
+
+/* 反应堆核心（左侧） */
+function drawCore(dt, heat, rate, simT) {
+  var cx = 250, cy = 300;
+  var baseR = 58 + Math.min(34, rate * 0.55);
+  var pulse = Math.sin(simT * (2 + rate * 0.12)) * 3;
+
+  // 外环（冷却套）
+  ctx.save();
+  ctx.translate(cx, cy);
+  for (var ring = 0; ring < 3; ring++) {
+    var rr = baseR + 26 + ring * 22;
+    ctx.beginPath();
+    ctx.arc(0, 0, rr, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(90,120,160,' + (0.24 - ring * 0.06) + ')';
+    ctx.lineWidth = 2;
+    ctx.setLineDash(ring % 2 ? [26, 18] : [10, 14]);
+    ctx.lineDashOffset = simT * (ring % 2 ? 22 : -16);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  ctx.restore();
+
+  // 核心辉光
+  var glowR = baseR + pulse;
+  var g = ctx.createRadialGradient(cx, cy, 4, cx, cy, glowR + 46);
+  g.addColorStop(0, heatColor(heat, 68, 0.95));
+  g.addColorStop(0.55, heatColor(heat, 52, 0.5));
+  g.addColorStop(1, heatColor(heat, 40, 0));
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(cx, cy, glowR + 46, 0, Math.PI * 2); ctx.fill();
+
+  // 核心本体
+  ctx.save();
+  ctx.shadowColor = heatColor(heat, 60, 0.9);
+  ctx.shadowBlur = 34;
+  ctx.fillStyle = heatColor(heat, 50, 0.92);
+  ctx.beginPath(); ctx.arc(cx, cy, glowR, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+
+  // 内芯亮斑
+  ctx.fillStyle = heatColor(heat, 78, 0.9);
+  ctx.beginPath(); ctx.arc(cx, cy, glowR * (0.34 + 0.1 * Math.sin(simT * 6)), 0, Math.PI * 2); ctx.fill();
+
+  // 热浪粒子（热得越高冒泡越猛）
+  if (run && phase === 'playing' && heat > 14 && Math.random() < heat / 90) {
+    var ang = Math.random() * Math.PI * 2;
+    var rr0 = Math.random() * glowR * 0.8;
+    particles.push({
+      x: cx + Math.cos(ang) * rr0, y: cy + Math.sin(ang) * rr0,
+      vy: -(18 + heat * 0.9 + Math.random() * 22), r: 1.5 + Math.random() * 2.6, life: 1
+    });
+  }
+  for (var p = particles.length - 1; p >= 0; p--) {
+    var pt = particles[p];
+    pt.life -= dt * 1.1; pt.y += pt.vy * dt; pt.x += Math.sin(pt.y * 0.05) * 0.6;
+    if (pt.life <= 0 || pt.y < cy - glowR - 40) { particles.splice(p, 1); continue; }
+    ctx.fillStyle = heatColor(heat, 75, pt.life * 0.7);
+    ctx.beginPath(); ctx.arc(pt.x, pt.y, pt.r, 0, Math.PI * 2); ctx.fill();
+  }
+
+  // 标签
+  ctx.font = '12px "Segoe UI", "Microsoft YaHei", sans-serif';
+  ctx.fillStyle = '#5c6b80';
+  ctx.textAlign = 'center';
+  ctx.fillText('REACTOR CORE · 产出 ' + fmt1(rate) + '/s', cx, H - 34);
+  ctx.textAlign = 'left';
+}
+
+/* 热量计（中左竖条） */
+function drawHeatGauge(heat) {
+  var x = 398, y = 78, w = 30, h = 400;
+  ctx.fillStyle = '#0d1420';
+  ctx.fillRect(x - 4, y - 4, w + 8, h + 8);
+  ctx.strokeStyle = '#223048'; ctx.lineWidth = 1;
+  ctx.strokeRect(x - 4, y - 4, w + 8, h + 8);
+
+  // 熔毁红区
+  ctx.fillStyle = 'rgba(255,60,40,0.12)';
+  ctx.fillRect(x, y, w, h * 0.2);
+
+  // 热量填充（自底向上）
+  var fh = h * Math.min(heat, 100) / 100;
+  var fg = ctx.createLinearGradient(0, y + h, 0, y);
+  fg.addColorStop(0, heatColor(0, 50, 0.9));
+  fg.addColorStop(0.6, heatColor(55, 55, 0.95));
+  fg.addColorStop(1, heatColor(100, 60, 1));
+  ctx.fillStyle = fg;
+  ctx.fillRect(x, y + h - fh, w, fh);
+
+  // VENT 可泄热量 ghost
+  var vh = run.ventHeat;
+  var vy0 = y + h - h * Math.min(heat, 100) / 100;
+  var vy1 = y + h - h * Math.max(0, heat - vh) / 100;
+  if (run.ventReady && heat > 1) {
+    ctx.fillStyle = 'rgba(120,230,130,0.25)';
+    ctx.fillRect(x + w + 4, vy1, 7, vy0 - vy1);
+  }
+
+  // 刻度
+  ctx.font = '10px Consolas, monospace';
+  ctx.fillStyle = '#4d5c72';
+  for (var tick = 0; tick <= 100; tick += 10) {
+    var ty = y + h - h * tick / 100;
+    ctx.fillRect(x - 10, ty, 6, 1);
+    if (tick % 20 === 0) ctx.fillText('' + tick, x - 34, ty + 3);
+  }
+  // 熔毁线
+  ctx.fillStyle = '#ff5040';
+  ctx.fillRect(x - 4, y - 1, w + 8, 2);
+
+  // 指针
+  var hy = y + h - h * Math.min(heat, 100) / 100;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(x - 12, hy - 1, w + 16, 2);
+
+  ctx.save();
+  ctx.translate(x - 46, y + h / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.font = 'bold 13px "Segoe UI", "Microsoft YaHei", sans-serif';
+  ctx.fillStyle = heat > 78 ? '#ff8177' : '#8fa1b8';
+  ctx.textAlign = 'center';
+  ctx.fillText('热量 ' + fmt1(heat) + ' / 100', 0, 4);
+  ctx.restore();
+}
+
+/* 右侧数据面板 */
+function drawRightPanel() {
+  var x = 470, y = 64;
+  ctx.textAlign = 'left';
+
+  if (!run) return;
+
+  // 剩余时间
+  ctx.font = 'bold 30px Consolas, monospace';
+  ctx.fillStyle = run.timeLeft < 30 ? '#ff8177' : '#dce7f5';
+  ctx.fillText(fmtClock(run.timeLeft), x, y + 6);
+  ctx.font = '12px "Segoe UI", "Microsoft YaHei", sans-serif';
+  ctx.fillStyle = '#5c6b80';
+  ctx.fillText('班次剩余 / ' + fmtClock(run.cfg.TIME_LIMIT), x + 120, y + 4);
+
+  // 不稳定度（局内难度曲线指示）
+  if (run.time > T.INSTABILITY_START) {
+    var pctInst = Math.round((run.instability - 1) * 100);
+    ctx.font = 'bold 13px "Segoe UI", "Microsoft YaHei", sans-serif';
+    ctx.fillStyle = '#ffab5e';
+    ctx.fillText('⚠ 核心不稳定 +' + pctInst + '% 产热', x + 120, y + 26);
+  }
+
+  // 入库进度条
+  var by = y + 46, bw = 430;
+  ctx.font = 'bold 15px "Segoe UI", "Microsoft YaHei", sans-serif';
+  ctx.fillStyle = '#ffd27a';
+  ctx.fillText('入库 ' + fmt1(run.banked) + ' / ' + run.cfg.VAULT_GOAL, x, by - 8);
+  ctx.fillStyle = '#0d1420';
+  ctx.fillRect(x, by, bw, 16);
+  var prog = Math.min(1, run.banked / run.cfg.VAULT_GOAL);
+  var pg = ctx.createLinearGradient(x, 0, x + bw, 0);
+  pg.addColorStop(0, '#8a6a1f'); pg.addColorStop(1, '#ffd27a');
+  ctx.fillStyle = pg;
+  ctx.fillRect(x, by, bw * prog, 16);
+  ctx.strokeStyle = '#3a3320';
+  ctx.strokeRect(x, by, bw, 16);
+
+  // 电力（主数字）
+  ctx.font = 'bold 44px Consolas, monospace';
+  ctx.fillStyle = '#eaf2fc';
+  ctx.fillText(fmt1(run.power), x, by + 74);
+  ctx.font = '13px "Segoe UI", "Microsoft YaHei", sans-serif';
+  ctx.fillStyle = '#7f92ab';
+  ctx.fillText('当前电力 · 产出 ' + fmt1(run.rate) + '/s · 已加购 x' + run.stokes, x, by + 96);
+
+  // 入库倍率（随热量着色）
+  ctx.font = 'bold 40px Consolas, monospace';
+  ctx.fillStyle = heatColor(run.heat, 62, 1);
+  ctx.fillText('×' + run.bankMult.toFixed(2), x + 300, by + 74);
+  ctx.font = '13px "Segoe UI", "Microsoft YaHei", sans-serif';
+  ctx.fillStyle = '#7f92ab';
+  ctx.fillText('入库倍率（热=高）', x + 300, by + 96);
+  ctx.fillText('冷存 ×' + T.BANK_MULT_MIN.toFixed(2) + ' → 红热 ×' + T.BANK_MULT_MAX.toFixed(2), x + 300, by + 114);
+
+  // 本局操作统计
+  ctx.font = '12px Consolas, monospace';
+  ctx.fillStyle = '#5c6b80';
+  ctx.fillText('stoke ' + run.stokes + '   vent ' + run.vents + '   bank ' + run.banks +
+    '   |   泄热量 ' + fmt1(run.ventHeat) + '   冷却 ' + fmt1(run.ventCd) + 's', x, H - 34);
+
+  // 最近一次入库提示
+  if (run.banks > 0 && run.time - run.lastGainAt < 2.2 && run.lastGain > 0) {
+    ctx.font = 'bold 15px Consolas, monospace';
+    ctx.fillStyle = 'rgba(255,210,122,' + (1 - (run.time - run.lastGainAt) / 2.2).toFixed(2) + ')';
+    ctx.fillText('上次入库 +' + fmt1(run.lastGain), x + 120, y + 48);
+  }
+}
+
+/* ---------- 按钮状态刷新 ---------- */
+function updateControls() {
+  var bs = document.getElementById('btnStoke');
+  var bv = document.getElementById('btnVent');
+  var bb = document.getElementById('btnBank');
+  var playing = phase === 'playing' && run;
+  bs.className = playing && run.power >= run.stokeCost ? '' : 'disabled';
+  bv.className = playing && run.ventReady ? '' : 'disabled cd';
+  bb.className = playing && run.power > 0 ? '' : 'disabled';
+  if (playing) {
+    document.getElementById('stokeInfo').textContent =
+      '价格 ' + Math.ceil(run.stokeCost) + ' · 产出 ×' + T.PROD_MULT;
+    document.getElementById('ventInfo').textContent = run.ventReady ?
+      '就绪 · 泄 ' + Math.round(run.ventHeat) + ' 热' :
+      '冷却 ' + run.ventCd.toFixed(1) + 's · 泄 ' + Math.round(run.ventHeat) + ' 热';
+    document.getElementById('bankInfo').textContent =
+      '倍率 ×' + run.bankMult.toFixed(2) + ' · 全额入库';
+  } else {
+    document.getElementById('stokeInfo').textContent = '价格 ' + T.STOKE_COST_BASE;
+    document.getElementById('ventInfo').textContent = '就绪 · 泄 ' + T.VENT_HEAT_BASE + ' 热';
+    document.getElementById('bankInfo').textContent = '倍率 ×' + T.BANK_MULT_MIN.toFixed(2);
+  }
+}
+
+/* ---------- 启动 ---------- */
+Core.beginSession();           // 页面即 session 开始
+refreshFoot();
+setInterval(refreshFoot, 600); // 埋点行每 0.6s 刷新
+requestAnimationFrame(function (ts) { lastTs = ts; requestAnimationFrame(loop); });
+</script>
+</body>
+</html>
